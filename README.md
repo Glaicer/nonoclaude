@@ -7,8 +7,13 @@
 **Let Claude Code skip permission prompts without handing it your whole machine.**
 
 </div>
+<br />
 
-Approving every command Claude Code wants to run gets old fast. Turning the prompts off with `--dangerously-skip-permissions` means trusting it with your SSH keys, your browser profiles, and everything else in your home directory. nonoclaude sits in between: it runs Claude Code with that flag, but inside a [nono](https://nono.sh/) sandbox. The limits are enforced by the operating system itself (Landlock on Linux, Seatbelt on macOS), so they hold even if the agent ignores what it's told.
+- Approving every command Claude Code wants to run gets old fast.
+- Auto-approval eats your credits and subscription limits.
+- `--dangerously-skip-permissions` leaves your machine defenseless against an accidentally written destructive command.
+
+**nonoclaude** sits in between: it runs Claude Code with that flag, but inside a [nono](https://nono.sh/) sandbox. The limits are enforced by the operating system itself (Landlock on Linux, Seatbelt on macOS), so they hold even if the agent ignores what it's told.
 
 Here's what Claude can do inside the sandbox:
 
@@ -20,9 +25,7 @@ Think of it as protection against accidents, like a stray `rm` or a script that 
 
 ## Install
 
-nonoclaude runs on Linux, WSL2, and macOS. You'll need `python3`, [nono](https://docs.nono.sh/cli/getting_started/installation) (`brew install nono` on macOS), and [Claude Code](https://code.claude.com/docs/en/setup).
-
-**A heads-up for Mac users: macOS support is new, and I haven't tested it on a real Mac yet.** If something breaks, please open an issue with the error. It helps a lot.
+nonoclaude runs on Linux, WSL2, and macOS. You'll need `python3`, [nono](https://docs.nono.sh/cli/getting_started/installation) (`brew install nono` on macOS), and Claude Code.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Glaicer/nonoclaude/main/install.sh | bash
