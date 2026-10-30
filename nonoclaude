@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+import glob
+import hashlib
+import json
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+SETTINGS = "$XDG_CONFIG_HOME/nono/claude-dev.json"
+AWARENESS = """You are running inside a nono filesystem sandbox, launched by nonoclaude.
+Writes are limited to the launch project, temporary directories, and Claude Code's own state (~/.claude, ~/.claude.json). Everything else is read-only; credential, browser, and key stores cannot be read at all. Network access is allowed.
+Installed programs such as git still work. Distinguish sandbox denials (EACCES/EPERM on paths outside the allowed set) from missing programs, authentication failures, and ordinary errors.
+When an operation fails because of the sandbox, do not retry it, escalate privileges, or route around the sandbox through another process or service. Ask the user to run it outside the sandbox: give the exact command, the working directory, and any destructive effects, then wait for their result."""
+PROTECTED = ["$HOME/.nono", "$XDG_STATE_HOME/nono"]
+
+
+def expand(value):
+    defaults = {
+        "HOME": str(Path.home()),
+        "XDG_CONFIG_HOME": str(Path.home() / ".config"),
+        "XDG_CACHE_HOME": str(Path.home() / ".cache"),
+        "XDG_DATA_HOME": str(Path.home() / ".local/share"),
+        "XDG_STATE_HOME": str(Path.home() / ".local/state"),
+        "TMPDIR": tempfile.gettempdir(),
+    }
+    for key, default in defaults.items():
+        value = value.replace("$" + key, os.environ.get(key) or default)
+    return Path(os.path.expanduser(value)).resolve()
+
+
+def within(path, parent):
+    return path == parent or parent in path.parents
+
+
+def split_grants(path, excluded):
+    # Landlock cannot deny inside a grant, so grant the siblings of every excluded path instead.
+    if any(within(path, item) for item in excluded) or not path.exists():
+        return []
+    if not any(within(item, path) for item in excluded):
+        return [str(path)]
+    if not path.is_dir():
+        return []
+    try:
+        children = sorted(path.iterdir())
+    except PermissionError:
+        return []
+    return [
+        grant
+        for child in children
+        if not child.is_symlink()
+        for grant in split_grants(child, excluded)
+    ]
+
+
+def make_profile(settings, cwd):
+    if cwd in (Path("/"), Path.home().resolve()):
+        raise ValueError("change to a project directory first")
+    protected = [expand(value) for value in PROTECTED]
+    excluded = protected[:]
+    for value in settings["exclude"]:
+        pattern = str(expand(value))
+        excluded.extend(Path(item).resolve() for item in glob.glob(pattern))
+        if not glob.has_magic(pattern):
+            excluded.append(Path(pattern))
+    if any(within(cwd, item) for item in excluded):
+        raise ValueError("the project directory is excluded from the sandbox")
+    read = []
+    for value in settings["read"]:
+        read += split_grants(expand(value), excluded)
+    for value in settings.get("read_exceptions", []):
+        read += split_grants(expand(value), protected)
+    allow = []
+    for path in [cwd, *(expand(value) for value in settings["write"])]:
+        if any(within(path, item) for item in protected):
+            raise ValueError(f"{path} is nono state and cannot be writable")
+        allow += split_grants(path, excluded)
+    profile = {
+        "meta": {"name": "claude-dev", "version": "1"},
+        "security": {"capability_elevation": False},
+        "workdir": {"access": "none"},
+        "filesystem": {"read": sorted(set(read)), "allow": sorted(set(allow))},
+        "groups": {
+            "exclude": [
+                "system_read_linux_core",
+                "user_tools",
+                "homebrew_linux",
+                "dangerous_commands",
+                "dangerous_commands_linux",
+            ]
+        },
+        "network": {"block": False},
+    }
+    if sys.platform == "darwin":
+        # Claude Code keeps its login in the Keychain, which nono denies by default.
+        profile["groups"]["include"] = ["claude_code_macos"]
+        profile["groups"]["exclude"] += [
+            "system_read_macos",
+            "system_write_macos",
+            "homebrew_macos",
+            "dangerous_commands_macos",
+        ]
+        profile["filesystem"]["bypass_protection"] = ["$HOME/Library/Keychains"]
+    return profile
+
+
+def which(name, hint):
+    found = shutil.which(name)
+    if not found:
+        raise ValueError(f"{name} is not installed; {hint}")
+    return found
+
+
+def write_profile(profile, cwd):
+    # Outside every write grant, so the sandboxed agent cannot edit the next launch's profile.
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    directory = (Path(runtime) if runtime else expand("$XDG_CACHE_HOME")) / "nonoclaude"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    digest = hashlib.sha256(str(cwd).encode()).hexdigest()[:16]
+    path = directory / f"{digest}.json"
+    staging = path.with_suffix(f".{os.getpid()}")
+    staging.write_text(json.dumps(profile))
+    os.replace(staging, path)
+    return path
+
+
+def main(args):
+    settings = json.loads(expand(SETTINGS).read_text())
+    for value in settings["write"]:
+        path = expand(value)
+        if not path.exists() and not path.suffix:
+            path.mkdir(parents=True)
+    cwd = Path.cwd().resolve()
+    profile = write_profile(make_profile(settings, cwd), cwd)
+    nono = which("nono", "see https://docs.nono.sh/cli/getting_started/installation")
+    claude = which("claude", "see https://code.claude.com/docs/en/setup")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("NONO_")}
+    # The updater writes outside the sandbox; `claude update` runs unsandboxed instead.
+    env.update(IS_SANDBOX="1", DISABLE_AUTOUPDATER="1")
+    os.execve(
+        nono,
+        [
+            nono,
+            "run",
+            "--profile",
+            str(profile),
+            "--no-rollback",
+            "--silent",
+            "--startup-timeout",
+            "0",
+            "--",
+            claude,
+            "--dangerously-skip-permissions",
+            "--append-system-prompt",
+            AWARENESS,
+            *args,
+        ],
+        env,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except (ValueError, OSError) as error:
+        print(f"nonoclaude: {error}", file=sys.stderr)
+        sys.exit(1)

@@ -1,0 +1,31 @@
+{
+  "read": ["/"],
+  "write": [
+    "/tmp",
+    "$HOME/.claude",
+    "$HOME/.claude.json",
+    "/dev/ptmx",
+    "/dev/pts"
+  ],
+  "exclude": [
+    "$HOME/.nono",
+    "$XDG_STATE_HOME/nono",
+    "$XDG_CONFIG_HOME/nono",
+    "$HOME/.ssh",
+    "$HOME/.gnupg",
+    "$HOME/.pki",
+    "$XDG_DATA_HOME/keyrings",
+    "$HOME/.password-store",
+    "$HOME/.config/google-chrome",
+    "$HOME/.config/google-chrome-dev",
+    "$HOME/.config/google-chrome-for-testing",
+    "$HOME/.config/chromium",
+    "$HOME/.config/mozilla",
+    "$HOME/.mozilla",
+    "$HOME/.netrc",
+    "$HOME/.npmrc",
+    "/etc/shadow*",
+    "/root",
+    "/boot"
+  ]
+}

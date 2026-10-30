@@ -1,0 +1,48 @@
+{
+  "read": [
+    "$HOME",
+    "/Applications",
+    "/Library",
+    "/System/Library",
+    "/System/Cryptexes",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/opt",
+    "/private/etc",
+    "/private/var/db",
+    "/dev"
+  ],
+  "write": [
+    "/tmp",
+    "$TMPDIR",
+    "$HOME/.claude",
+    "$HOME/.claude.json",
+    "/dev"
+  ],
+  "exclude": [
+    "$HOME/.nono",
+    "$XDG_STATE_HOME/nono",
+    "$XDG_CONFIG_HOME/nono",
+    "$HOME/.ssh",
+    "$HOME/.gnupg",
+    "$HOME/.password-store",
+    "$HOME/.netrc",
+    "$HOME/.npmrc",
+    "$HOME/Library/Keychains",
+    "/Library/Keychains",
+    "$HOME/Library/Application Support/Google/Chrome",
+    "$HOME/Library/Application Support/Google/Chrome for Testing",
+    "$HOME/Library/Application Support/Chromium",
+    "$HOME/Library/Application Support/Firefox",
+    "$HOME/Library/Application Support/Microsoft Edge",
+    "$HOME/Library/Application Support/Arc",
+    "$HOME/Library/Application Support/BraveSoftware",
+    "$HOME/Library/Safari",
+    "$HOME/Library/Containers/com.apple.Safari",
+    "$HOME/Library/Messages",
+    "$HOME/Library/Mail",
+    "$HOME/Library/Cookies",
+    "$HOME/Library/Application Support/MobileSync"
+  ]
+}
