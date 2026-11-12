@@ -56,6 +56,46 @@ class ProfileTests(unittest.TestCase):
         allow = self.profile()["filesystem"]["allow"]
         self.assertEqual(allow, [str(self.home / ".claude"), str(self.project)])
 
+    def test_linked_worktree_git_directory_is_writable(self):
+        main = self.home / "main"
+        worktree = self.home / "worktree"
+        git = ["git", "-c", "user.name=probe", "-c", "user.email=probe@example.invalid"]
+        subprocess.run([*git, "init", "-q", str(main)], check=True)
+        subprocess.run(
+            [*git, "-C", str(main), "commit", "-q", "--allow-empty", "-m", "base"],
+            check=True,
+        )
+        subprocess.run(
+            [*git, "-C", str(main), "worktree", "add", "-q", str(worktree)], check=True
+        )
+        settings = {"read": [], "write": [], "exclude": []}
+        allow = nonoclaude.make_profile(settings, worktree)["filesystem"]["allow"]
+        self.assertEqual(allow, [str(main / ".git"), str(worktree)])
+
+    def test_forged_git_file_does_not_unlock_another_repository(self):
+        victim = self.home / "victim"
+        git = ["git", "-c", "user.name=probe", "-c", "user.email=probe@example.invalid"]
+        subprocess.run([*git, "init", "-q", str(victim)], check=True)
+        subprocess.run(
+            [*git, "-C", str(victim), "commit", "-q", "--allow-empty", "-m", "base"],
+            check=True,
+        )
+        subprocess.run(
+            [*git, "-C", str(victim), "worktree", "add", "-q", str(self.home / "real")],
+            check=True,
+        )
+        fake = self.home / "fake"
+        subprocess.run(["git", "init", "-q", "--bare", str(fake)], check=True)
+        (fake / "commondir").write_text(str(victim / ".git"))
+        settings = {"read": [], "write": [], "exclude": []}
+        for target in [victim / ".git", victim / ".git/worktrees/real", fake]:
+            with self.subTest(target=target):
+                (self.project / ".git").write_text(f"gitdir: {target}\n")
+                allow = nonoclaude.make_profile(settings, self.project)["filesystem"][
+                    "allow"
+                ]
+                self.assertEqual(allow, [str(self.project)])
+
     def test_refuses_home_as_project(self):
         with self.assertRaisesRegex(ValueError, "project directory"):
             nonoclaude.make_profile({"read": [], "write": [], "exclude": []}, self.home)

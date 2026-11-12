@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -54,6 +55,39 @@ def split_grants(path, excluded):
     ]
 
 
+def linked_worktree_common_dir(cwd):
+    git = shutil.which("git")
+    if not git:
+        return None
+    result = subprocess.run(
+        [
+            git,
+            "-C",
+            str(cwd),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+            "--show-toplevel",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or len(lines) != 3:
+        return None
+    git_dir, common, toplevel = (Path(line).resolve() for line in lines)
+    # why: cwd/.git is agent-writable, so trust only a worktree the main repository registered back to cwd
+    if git_dir.parent != common / "worktrees":
+        return None
+    try:
+        registered = (git_dir / (git_dir / "gitdir").read_text().strip()).resolve()
+    except OSError:
+        return None
+    return common if registered == toplevel / ".git" else None
+
+
 def make_profile(settings, cwd):
     if cwd in (Path("/"), Path.home().resolve()):
         raise ValueError("change to a project directory first")
@@ -71,8 +105,13 @@ def make_profile(settings, cwd):
         read += split_grants(expand(value), excluded)
     for value in settings.get("read_exceptions", []):
         read += split_grants(expand(value), protected)
+    writable = [cwd, *(expand(value) for value in settings["write"])]
+    common = linked_worktree_common_dir(cwd)
+    if common:
+        # why: a linked worktree keeps its index, objects and refs in the main repository's .git
+        writable.append(common)
     allow = []
-    for path in [cwd, *(expand(value) for value in settings["write"])]:
+    for path in writable:
         if any(within(path, item) for item in protected):
             raise ValueError(f"{path} is nono state and cannot be writable")
         allow += split_grants(path, excluded)
