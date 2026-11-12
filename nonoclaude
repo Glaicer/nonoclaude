@@ -55,10 +55,20 @@ def split_grants(path, excluded):
     ]
 
 
-def linked_worktree_common_dir(cwd):
+def read_pointer(path, prefix=""):
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    if not text.startswith(prefix):
+        return None
+    return (path.parent / text[len(prefix) :].strip()).resolve()
+
+
+def git_grants(cwd):
     git = shutil.which("git")
     if not git:
-        return None
+        return []
     result = subprocess.run(
         [
             git,
@@ -76,16 +86,22 @@ def linked_worktree_common_dir(cwd):
     )
     lines = result.stdout.splitlines()
     if result.returncode != 0 or len(lines) != 3:
-        return None
+        return []
     git_dir, common, toplevel = (Path(line).resolve() for line in lines)
-    # why: cwd/.git is agent-writable, so trust only a worktree the main repository registered back to cwd
-    if git_dir.parent != common / "worktrees":
-        return None
-    try:
-        registered = (git_dir / (git_dir / "gitdir").read_text().strip()).resolve()
-    except OSError:
-        return None
-    return common if registered == toplevel / ".git" else None
+    # why: cwd/.git and .git/worktrees/* are agent-writable, so each grant must be
+    # confirmed by a back-pointer that lives outside what the agent could already write
+    if git_dir == common == toplevel / ".git":
+        return [
+            marker.parent
+            for entry in sorted((common / "worktrees").glob("*/gitdir"))
+            if (marker := read_pointer(entry))
+            and marker.name == ".git"
+            and read_pointer(marker, "gitdir: ") == entry.parent.resolve()
+        ]
+    is_linked = git_dir.parent == common / "worktrees"
+    if is_linked and read_pointer(git_dir / "gitdir") == toplevel / ".git":
+        return [common]
+    return []
 
 
 def make_profile(settings, cwd):
@@ -106,10 +122,7 @@ def make_profile(settings, cwd):
     for value in settings.get("read_exceptions", []):
         read += split_grants(expand(value), protected)
     writable = [cwd, *(expand(value) for value in settings["write"])]
-    common = linked_worktree_common_dir(cwd)
-    if common:
-        # why: a linked worktree keeps its index, objects and refs in the main repository's .git
-        writable.append(common)
+    writable += git_grants(cwd)
     allow = []
     for path in writable:
         if any(within(path, item) for item in protected):

@@ -96,6 +96,41 @@ class ProfileTests(unittest.TestCase):
                 ]
                 self.assertEqual(allow, [str(self.project)])
 
+    def test_main_checkout_can_write_only_its_registered_worktrees(self):
+        git = ["git", "-c", "user.name=probe", "-c", "user.email=probe@example.invalid"]
+        main = self.home / "main"
+        other = self.home / "other"
+        for repo in [main, other]:
+            subprocess.run([*git, "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                [*git, "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "base"],
+                check=True,
+            )
+        for repo, worktree in [(main, "worktree"), (other, "foreign")]:
+            subprocess.run(
+                [
+                    *git,
+                    "-C",
+                    str(repo),
+                    "worktree",
+                    "add",
+                    "-q",
+                    str(self.home / worktree),
+                ],
+                check=True,
+            )
+        settings = {"read": [], "write": [], "exclude": []}
+        forged = main / ".git/worktrees/forged"
+        forged.mkdir()
+        for target in [other, self.home / "foreign", self.project]:
+            with self.subTest(target=target):
+                (forged / "gitdir").write_text(f"{target / '.git'}\n")
+                allow = nonoclaude.make_profile(settings, main)["filesystem"]["allow"]
+                self.assertEqual(allow, [str(main), str(self.home / "worktree")])
+        (self.project / ".git").symlink_to(main / ".git")
+        allow = nonoclaude.make_profile(settings, self.project)["filesystem"]["allow"]
+        self.assertEqual(allow, [str(self.project)])
+
     def test_refuses_home_as_project(self):
         with self.assertRaisesRegex(ValueError, "project directory"):
             nonoclaude.make_profile({"read": [], "write": [], "exclude": []}, self.home)
